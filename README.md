@@ -104,37 +104,36 @@ Les conteneurs ont `restart: unless-stopped` : ils redémarrent avec le serveur 
 
 ## 5bis. Sous-domaine + reverse proxy nginx (HTTPS)
 
-Exemple : `flights.example.com` (remplacer par votre sous-domaine).
+Sous-domaine utilisé : `scrapper.guenstravel.com`.
 
-1. **DNS** : créer un enregistrement `A` (et `AAAA` si IPv6) `flights` → IP publique du serveur. Vérifier : `dig +short flights.example.com`.
+1. **DNS** : créer un enregistrement `A` (et `AAAA` si IPv6) `scrapper` (zone `guenstravel.com`) → IP publique du serveur (actuellement `145.239.75.143`). Vérifier : `dig +short scrapper.guenstravel.com`.
 2. **Pare-feu** : ouvrir seulement 80 et 443 (`sudo ufw allow 'Nginx Full'`). Ne PAS ouvrir 8776 ni 3307.
 3. **Installer nginx et certbot** :
    ```bash
    sudo apt install -y nginx certbot python3-certbot-nginx
    ```
-4. **Configurer le site** avec `deploy/nginx-flights.conf` (remplacer `flights.example.com`) :
+4. **Configurer le site** avec `deploy/scrapper.guenstravel.com.conf` (déjà adapté au sous-domaine) :
    ```bash
-   sudo cp deploy/nginx-flights.conf /etc/nginx/sites-available/flights.example.com
-   sudo sed -i 's/flights.example.com/VOTRE.SOUS-DOMAINE/g' /etc/nginx/sites-available/flights.example.com
-   sudo ln -s /etc/nginx/sites-available/flights.example.com /etc/nginx/sites-enabled/
+   sudo cp deploy/scrapper.guenstravel.com.conf /etc/nginx/sites-available/scrapper.guenstravel.com
+   sudo ln -s /etc/nginx/sites-available/scrapper.guenstravel.com /etc/nginx/sites-enabled/
    ```
    Le fichier référence des certificats qui n'existent pas encore : émettre d'abord le certificat en mode standalone/webroot, ou
    commenter temporairement le bloc `443`, puis :
    ```bash
    sudo nginx -t && sudo systemctl reload nginx
-   sudo certbot --nginx -d VOTRE.SOUS-DOMAINE        # certificat + renouvellement automatique
+   sudo certbot --nginx -d scrapper.guenstravel.com        # certificat + renouvellement automatique
    sudo nginx -t && sudo systemctl reload nginx
    ```
 5. **Tester** :
    ```bash
-   curl -i https://VOTRE.SOUS-DOMAINE/api/flights                    # 401 (pas de clé)
-   curl -H "X-API-Key: $KEY" "https://VOTRE.SOUS-DOMAINE/api/flights?origin=DLA&limit=2"   # 200
-   curl -I http://VOTRE.SOUS-DOMAINE/                                # 301 vers HTTPS
+   curl -i https://scrapper.guenstravel.com/api/flights                    # 401 (pas de clé)
+   curl -H "X-API-Key: $KEY" "https://scrapper.guenstravel.com/api/flights?origin=DLA&limit=2"   # 200
+   curl -I http://scrapper.guenstravel.com/                                # 301 vers HTTPS
    ```
 
 Ce que fait la configuration : redirection HTTP→HTTPS, HSTS, limitation à 10 req/s par IP, transmission de l'IP réelle,
 exposition de `/api/` uniquement (`/docs` et le reste en 404), et possibilité de restreindre par IP (`allow`/`deny`).
-Les applications distantes appellent alors `https://VOTRE.SOUS-DOMAINE/api/flights` avec `X-API-Key`.
+Les applications distantes appellent alors `https://scrapper.guenstravel.com/api/flights` avec `X-API-Key`.
 Les applications du même serveur peuvent continuer à utiliser `http://127.0.0.1:8776`.
 
 ---
