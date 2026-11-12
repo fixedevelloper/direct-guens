@@ -1,0 +1,8 @@
+.env
+.venv/
+__pycache__/
+debug/
+*.sql
+flights.json
+server.log
+nohup.out

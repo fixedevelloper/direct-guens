@@ -1,0 +1,42 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: camair
+      MYSQL_USER: camair
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-camair}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-rootpass}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql+aiomysql://camair:${MYSQL_PASSWORD:-camair}@mysql:3306/camair?charset=utf8mb4
+      API_KEY: ${API_KEY:?Définir API_KEY dans .env (openssl rand -hex 32)}
+      ENABLE_DOCS: ${ENABLE_DOCS:-false}
+      SCRAPE_INTERVAL_HOURS: ${SCRAPE_INTERVAL_HOURS:-6}
+      CONCURRENCY: ${CONCURRENCY:-2}
+      DAYS_AHEAD: ${DAYS_AHEAD:-30}
+      RUN_ON_STARTUP: ${RUN_ON_STARTUP:-false}
+      AIRPORTS: ${AIRPORTS:-BFX,BZV,COO,DLA,GOU,LBV,MVR,NGJ,NGE,PNR,NSI}
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8776}:8000"
+    ipc: host          # recommandé pour Chromium
+    init: true
+
+volumes:
+  mysql_data:

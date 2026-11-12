@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+playwright==1.65.0
+apscheduler>=3.10,<4
+sqlalchemy[asyncio]>=2.0
+aiomysql>=0.2
+cryptography>=42
