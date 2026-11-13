@@ -38,7 +38,7 @@ nano .env          # CHANGER les mots de passe MySQL
 
 # 2b. Générer la clé API
 sed -i "s|^API_KEY=.*|API_KEY=$(openssl rand -hex 32)|" .env
-
+API_KEY=215860236ced3a5d90a0af3635d288606699cca1d7573b8e3429a1e80a4e1539
 # 3. Construire et démarrer (le premier build télécharge l'image Playwright, ~2 Go)
 docker compose up -d --build
 
@@ -58,7 +58,10 @@ Fichiers du projet : `app_scraper.py` (scraping + API), `db.py` (MySQL), `Docker
 | `ENABLE_DOCS` | `false` | `true` expose `/docs` (Swagger) ; à éviter en production |
 | `MYSQL_PORT` | `3307` | Port MySQL exposé sur `127.0.0.1` de l'hôte |
 | `APP_BIND` / `APP_PORT` | `127.0.0.1` / `8776` | Interface et port de l'API |
-| `SCRAPE_INTERVAL_HOURS` | `6` | Fréquence du scraping automatique |
+| `SCRAPE_INTERVAL_HOURS` | `6` | Fréquence du scraping automatique (mode `auto`) |
+| `REFRESH_DAYS` | `5` | Mode refresh : aujourd'hui → J+4, tarifs remis à jour à chaque cycle |
+| `EXTEND_DAYS` | `5` | Mode extend : nombre max de jours manquants ajoutés par cycle (jusqu'à `DAYS_AHEAD`) |
+| `FULL_SCRAPE_DAY` / `FULL_SCRAPE_HOUR` | `sun` / `2` | Scraping complet hebdomadaire (jour et heure, fuseau du conteneur : UTC) |
 | `RUN_ON_STARTUP` | `false` | Lance un scraping dès le démarrage |
 | `CONCURRENCY` | `2` | Navigateurs en parallèle (plus = plus rapide, plus risqué : blocage, RAM) |
 | `DAYS_AHEAD` | `30` | Nombre de jours scrapés |
@@ -66,16 +69,27 @@ Fichiers du projet : `app_scraper.py` (scraping + API), `db.py` (MySQL), `Docker
 
 Après modification : `docker compose up -d`.
 
-> **Durée d'un cycle** : 110 trajets × 30 jours. Les jours sans vol sont ignorés rapidement, mais un cycle complet peut durer
-> plusieurs heures. Un cycle déjà en cours n'est jamais relancé en double. Si 6 h est trop court, augmentez
-> `CONCURRENCY` (3-4) ou `SCRAPE_INTERVAL_HOURS`.
+### Modes de scraping
+
+| Mode | Fenêtre | Quand |
+|---|---|---|
+| `auto` (défaut) | `refresh` + `extend` | toutes les `SCRAPE_INTERVAL_HOURS` ; devient `full` au tout premier lancement (base vide) |
+| `refresh` | aujourd'hui → J+4 | tarifs proches du départ remis à jour |
+| `extend` | jours manquants après la dernière date couverte (5 max, plafonné à J+`DAYS_AHEAD`) | maintient la fenêtre glissante de 30 jours |
+| `full` | 30 jours | une fois par semaine (`FULL_SCRAPE_DAY`), ou à la demande |
+
+Fonctionnement : pour chaque trajet, **une sonde** récupère la liste des dates avec vols ; seuls ces jours sont recherchés.
+Les trajets inexistants sont mémorisés (revérifiés après 7 jours) et ne sont plus sondés. Chaque jour est enregistré dès qu'il est
+lu : un échec (timeout, 429/503) **ne supprime jamais** les données existantes. Les vols passés sont purgés chaque jour.
+Le premier scraping complet reste long (plusieurs heures) ; les cycles `auto` suivants sont bien plus courts.
+Un seul scraping tourne à la fois ; un cycle planifié qui tombe pendant un autre est ignoré.
 
 ## 4. Exploitation
 
 ```bash
 docker compose logs -f app                      # logs
 KEY=$(grep ^API_KEY .env | cut -d= -f2)
-curl -X POST -H "X-API-Key: $KEY" http://127.0.0.1:8776/api/scrape/start   # scraping manuel
+curl -X POST -H "X-API-Key: $KEY" "http://127.0.0.1:8776/api/scrape/start?mode=refresh"   # auto | refresh | extend | full
 curl -H "X-API-Key: $KEY" http://127.0.0.1:8776/api/scrape/status          # état
 docker compose restart app
 docker compose down                             # arrêt, données conservées
@@ -117,6 +131,7 @@ Sous-domaine utilisé : `scrapper.guenstravel.com`.
    sudo cp deploy/scrapper.guenstravel.com.conf /etc/nginx/sites-available/scrapper.guenstravel.com
    sudo ln -s /etc/nginx/sites-available/scrapper.guenstravel.com /etc/nginx/sites-enabled/
    ```
+   **Attention** : si vous laissez certbot modifier le fichier (`--nginx`), il greffe le SSL sur le premier bloc `server` et casse la config (boucle de redirection, plus de proxy). Préférez `sudo certbot certonly --webroot -w /var/www/html -d scrapper.guenstravel.com`, puis installez le fichier fourni tel quel.
    Le fichier référence des certificats qui n'existent pas encore : émettre d'abord le certificat en mode standalone/webroot, ou
    commenter temporairement le bloc `443`, puis :
    ```bash
@@ -152,7 +167,8 @@ Application sur l'hôte (hors Docker) → `http://127.0.0.1:8776`, avec l'en-tê
 | `GET /api/info` | Infos du service |
 | `GET /api/flights?origin=DLA&destination=NSI&date=2026-11-20&limit=100&offset=0` | Vols (tous les filtres sont optionnels) |
 | `GET /api/scrape/status` | État du scraping |
-| `POST /api/scrape/start` | Lance un scraping (409 si déjà en cours) |
+| `POST /api/scrape/start?mode=auto\|refresh\|extend\|full` | Lance un scraping (409 si déjà en cours) |
+| `GET /api/scrape/coverage` | Plage de dates couverte, jours par statut, trajets connus/inexistants |
 
 Réponse de `/api/flights` :
 ```json
